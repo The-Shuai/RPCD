@@ -10,7 +10,8 @@ HELP = """
         A: 正常
         Z: 噪音过多
         X: 明显孔洞
-        C: 明显缺失
+        C: 车窗孔洞
+        V: 明显缺失
         S: 切换分割视图 （有分割文件才可以）
         D: 分割标注错误
         space: 切换背景 （绿色背景，更容易看出问题）
@@ -98,7 +99,8 @@ class VisualChecker:
             ord('A'): self.note_good,
             ord('Z'): self.note_noise,
             ord('X'): self.note_hole,
-            ord('C'): self.note_imcomplete,
+            ord('C'): self.note_vehicle_hole,
+            ord('V'): self.note_incomplete,
             ord('S'): self.toggle_seg,
             ord('D'): self.seg_wrong,
             ord(' '): self.change_background_color,
@@ -151,8 +153,11 @@ class VisualChecker:
     def note_hole(self, vis):
         self.toggle_note('明显孔洞')
 
-    def note_imcomplete(self, vis):
+    def note_incomplete(self, vis):
         self.toggle_note('明显缺失')
+
+    def note_vehicle_hole(self, vis):
+        self.toggle_note('车窗孔洞')
 
     def toggle_note(self, note):
         if note in self.rst_notes_set:
