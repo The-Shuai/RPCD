@@ -1,11 +1,15 @@
 import open3d as o3d
 import numpy as np
+import multiprocessing as mt
+import tkinter as tk
 import os
+import sys
 
-DATA_DIR = 'out'
+DATA_DIR = 'out_new'
 RST_FILE = 'rst.csv'
 HELP = """
         程序使用说明
+        选中绘图窗口按快捷键：（关闭输入法）
         Q: 下一个
         A: 正常
         Z: 噪音过多
@@ -22,6 +26,8 @@ HELP = """
 def main():
     print(HELP)
     check_files = ['clean_100k.ply', 'real_100k.ply', 'noiseless.ply', 'mesh.ply']
+    if not os.path.exists(RST_FILE):
+        open(RST_FILE, 'w').close()
     rst_file = open(RST_FILE, 'r+', encoding="utf-8")
     lines = rst_file.readlines()
     if len(lines) == 0:
@@ -45,22 +51,29 @@ def main():
         print(f"[{i}/{len(processing_items_list)}]")
         sub_dir = os.path.join(DATA_DIR, item)
         print(f'Dealing {sub_dir}')
-        if len(os.listdir(sub_dir)) != 10:
+        if len(os.listdir(sub_dir)) != 11:
             print(f'{item} data is not complete')
             rst_file.write(f'{item}, , , , ,data not complete\n')
             rst_file.flush()
             continue
         all_note_str = []
         for check_file in check_files:
-            raw_point_cloud = o3d.io.read_point_cloud(os.path.join(sub_dir, check_file))
+            check_file_path = os.path.join(sub_dir, check_file)
+            if 'mesh' in check_file:
+                raw_point_cloud = o3d.io.read_triangle_mesh(check_file_path)
+            else:
+                raw_point_cloud = o3d.io.read_point_cloud(check_file_path)
             seg_pc = []
             # load seg annotation
-            if check_file == 'clean_100k.ply':
-                annotation_file = os.path.join(sub_dir, 'annotation.txt')
+            if check_file in ['clean_100k.ply', 'real_100k.ply']:
+                if check_file == 'clean_100k.ply':
+                    annotation_file = os.path.join(sub_dir, 'clean_annotation.txt')
+                else:
+                    annotation_file = os.path.join(sub_dir, 'real_annotation.txt')
                 if not os.path.isfile(annotation_file):
                     print('annotation file not found')
                 else:
-                    with open(os.path.join(sub_dir, 'annotation.txt'), 'r', encoding='utf-8') as f:
+                    with open(annotation_file, 'r', encoding='utf-8') as f:
                         lines = f.readlines()
                     temp_dic = {}
                     for line in lines:
@@ -73,6 +86,8 @@ def main():
                         pc = pc.paint_uniform_color(np.random.rand(3, 1))
                         seg_pc.append(pc)
             rst_notes_set = set()
+            if len(seg_pc) == 0 and check_file in ['clean_100k.ply', 'real_100k.ply']:
+                rst_notes_set.add('分割标注缺失')
             VisualChecker(raw_point_cloud, seg_pc, rst_notes_set, window_name=f'{item} {check_file}').run()
             notes_str = ' '.join(rst_notes_set)
             all_note_str.append(notes_str)
@@ -82,6 +97,37 @@ def main():
             rst_file.write(','.join(all_note_str))
             rst_file.write(',\n')
             rst_file.flush()
+
+
+class GUIAnnotationProcess(mt.Process):
+    def run(self) -> None:
+        window = tk.Tk()
+        rst_dict: dict = self._args[0]
+        window.geometry("200x300+820+30")
+
+        def toggle_state(note, btn: tk.Button):
+            if note in rst_dict:
+                btn.config(fg='black')
+                rst_dict.pop(note)
+            else:
+                btn.config(fg='red')
+                rst_dict[note] = True
+
+        def create_btn(note):
+            btn = tk.Button(window, text=note, command=lambda: toggle_state(note, btn))
+            btn.pack(pady=2)
+            return btn
+
+        create_btn('正常')
+        create_btn('噪音过多')
+        create_btn('明显孔洞')
+        create_btn('车窗孔洞')
+        create_btn('明显缺失')
+        create_btn('分割标注错误')
+        create_btn('类别不明')
+        create_btn('表面不光滑')
+
+        window.mainloop()
 
 
 class VisualChecker:
@@ -94,6 +140,7 @@ class VisualChecker:
         self.height = height
         self.bg_white_status = True
         self.show_seg_status = False
+        self.child_process = None
 
         self.key_to_call_back = {
             ord('A'): self.note_good,
@@ -108,12 +155,27 @@ class VisualChecker:
         }
 
     def run(self):
-        o3d.visualization.draw_geometries_with_key_callbacks([self.pc], self.key_to_call_back, self.window_name,
+        shared_note_dict = mt.Manager().dict()
+        self.child_process = GUIAnnotationProcess(args=(shared_note_dict,))
+        self.child_process.start()
+        if self.seg_pcs is None or len(self.seg_pcs) == 0:
+            self.show_seg_status = False
+            init_show_objs = [self.pc]
+        else:
+            init_show_objs = self.seg_pcs
+            self.show_seg_status = True
+        o3d.visualization.draw_geometries_with_key_callbacks(init_show_objs, self.key_to_call_back, self.window_name,
                                                              width=self.width,
-                                                             height=self.height)
+                                                             height=self.height, left=50, top=50)
+        if len(shared_note_dict) > 0:
+            # if len(self.rst_notes_set) > 0:
+            #     print("Warning, notes made by keyboard shortcuts is override")
+            # self.rst_notes_set.clear()
+            self.rst_notes_set.update(set(shared_note_dict.keys()))
+        self.child_process.kill()
+        self.child_process.join()
 
     def change_background_color(self, vis: o3d.visualization.Visualizer):
-
         opt = vis.get_render_option()
         if self.bg_white_status:
             opt.background_color = np.asarray([0, 255, 0])
@@ -124,7 +186,9 @@ class VisualChecker:
 
     def abort(self, vis):
         print('abort')
-        exit(-1)
+        self.child_process.kill()
+        self.child_process.join()
+        sys.exit(0)
 
     def toggle_seg(self, vis: o3d.visualization.Visualizer):
         if self.seg_pcs is None or len(self.seg_pcs) == 0:
