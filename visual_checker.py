@@ -18,6 +18,7 @@ HELP = """
         V: 明显缺失
         S: 切换分割视图 （有分割文件才可以）
         D: 分割标注错误
+        W: 有离群点（手工可剔除）
         space: 切换背景 （绿色背景，更容易看出问题）
         .: 强制中断程序
         """
@@ -120,6 +121,7 @@ class GUIAnnotationProcess(mt.Process):
 
         create_btn('正常')
         create_btn('噪音过多')
+        create_btn('有离群点')
         create_btn('明显孔洞')
         create_btn('车窗孔洞')
         create_btn('明显缺失')
@@ -150,6 +152,7 @@ class VisualChecker:
             ord('V'): self.note_incomplete,
             ord('S'): self.toggle_seg,
             ord('D'): self.seg_wrong,
+            ord('W'): self.note_outliers,
             ord(' '): self.change_background_color,
             ord('.'): self.abort
         }
@@ -222,6 +225,9 @@ class VisualChecker:
 
     def note_vehicle_hole(self, vis):
         self.toggle_note('车窗孔洞')
+
+    def note_outliers(self, vis):
+        self.toggle_note('有离群点')
 
     def toggle_note(self, note):
         if note in self.rst_notes_set:
